@@ -1,5 +1,18 @@
+#[macro_use]
+extern crate error_chain;
+
+use std::error::Error;
 use rand::{thread_rng, prelude::*};
 use arr_macro::arr;
+
+mod errors {
+    error_chain!{
+        foreign_links {
+            Io(::std::io::Error);
+        }
+    }
+}
+use errors::*;
 
 // Also change get_cols() and get_cols_mut() when changing board dimensions
 const BOARD_HEIGHT: usize = 10;
@@ -13,12 +26,11 @@ const POPULATION_SIZE: usize = 5;
  * 10% de POISON: 2
 */
 
-type BasicBoard = [[i32;BOARD_HEIGHT];BOARD_WIDTH];
-type BasicBoardRotated = [[i32;BOARD_WIDTH];BOARD_HEIGHT];
-type BasicBoardRef<'a> = [[&'a i32;BOARD_HEIGHT];BOARD_WIDTH];
-type BasicBoardRefMut<'a> = [[&'a mut i32;BOARD_HEIGHT];BOARD_WIDTH];
-type BasicBoardRefRotated<'a> = [[&'a i32;BOARD_WIDTH];BOARD_HEIGHT];
-type BasicBoardRefMutRotated<'a> = [[&'a mut i32;BOARD_WIDTH];BOARD_HEIGHT];
+type BasicBoard = [[u8;BOARD_HEIGHT];BOARD_WIDTH];
+type BasicBoardRotated = [[u8;BOARD_WIDTH];BOARD_HEIGHT];
+type BasicBoardRef<'a> = [[&'a u8;BOARD_HEIGHT];BOARD_WIDTH];
+type BasicBoardRefMut<'a> = [[&'a mut u8;BOARD_HEIGHT];BOARD_WIDTH];
+type BasicBoardRefRotated<'a> = [[&'a u8;BOARD_WIDTH];BOARD_HEIGHT];
 
 struct Board {
     rows:BasicBoard
@@ -43,17 +55,24 @@ impl Board {
         }; 10]; // BOARD_WIDTH
         cols
     }
-    pub fn get_cols_mut<'a>(&'a mut self) -> BasicBoardRefMutRotated { 
-        let mut i = 0;
-        let cols:BasicBoardRefMutRotated = arr![{
-            i += 1;
-            let mut j = 0;
-            arr![{
-                j += 1;
-                &mut self.rows[j-1][i-1]
-            }; 10] // BOARD_HEIGHT
-        }; 10]; // BOARD_WIDTH
-        cols
+    pub fn get(&self, row:usize, col:usize) -> Result<&u8> {
+        if row >= BOARD_HEIGHT {
+            Err("row out of range".into())
+        } else if col >= BOARD_WIDTH {
+            Err("col out of range".into())
+        } else {
+            Ok(&self.rows[row][col])
+        }
+    }
+    pub fn set(&mut self, row:usize, col:usize, val:u8) -> Result<()> {
+        if row >= BOARD_HEIGHT {
+            Err("row out of range".into())
+        } else if col >= BOARD_WIDTH {
+            Err("col out of range".into())
+        } else {
+            self.rows[row][col] = val;
+            Ok(())
+        }
     }
     pub fn new() -> Self {
         let mut rng = thread_rng();
@@ -69,6 +88,9 @@ impl Board {
                 }
             }; 10] // BOARD_WIDTH
         }; 10] } // BOARD_HEIGHT
+    }
+    pub fn display() -> Result<()> {
+        Ok(())
     }
 }
 
