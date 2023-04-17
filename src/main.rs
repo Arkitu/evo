@@ -1,9 +1,13 @@
 #[macro_use]
 extern crate error_chain;
 
-use std::error::Error;
 use rand::{thread_rng, prelude::*};
 use arr_macro::arr;
+
+use crossterm::event::{Event, KeyCode, KeyEvent};
+use crossterm::{event, terminal};
+use std::time::Duration;
+use std::thread;
 
 mod errors {
     error_chain!{
@@ -20,6 +24,14 @@ const BOARD_WIDTH: usize = 10;
 
 const POPULATION_SIZE: usize = 5;
 
+struct CleanUp;
+
+impl Drop for CleanUp {
+    fn drop(&mut self) {
+        terminal::disable_raw_mode().expect("Unable to disable raw mode")
+    }
+}
+
 /* Board :
  * 80% de NULL: 0
  * 10% de FOOD: 1
@@ -27,9 +39,6 @@ const POPULATION_SIZE: usize = 5;
 */
 
 type BasicBoard = [[u8;BOARD_HEIGHT];BOARD_WIDTH];
-type BasicBoardRotated = [[u8;BOARD_WIDTH];BOARD_HEIGHT];
-type BasicBoardRef<'a> = [[&'a u8;BOARD_HEIGHT];BOARD_WIDTH];
-type BasicBoardRefMut<'a> = [[&'a mut u8;BOARD_HEIGHT];BOARD_WIDTH];
 type BasicBoardRefRotated<'a> = [[&'a u8;BOARD_WIDTH];BOARD_HEIGHT];
 
 struct Board {
@@ -94,9 +103,38 @@ impl Board {
     }
 }
 
-fn main() {
+struct Output;
+
+impl Output {
+
+}
+
+fn main() -> Result<()> {
+    let _clean_up = CleanUp;
+    terminal::enable_raw_mode()?;
+    thread::spawn(|| -> Result<()> {
+        loop {
+            if event::poll(Duration::from_millis(1000))? {
+                if let Event::Key(event) = event::read()? {
+                    match event {
+                        KeyEvent {
+                            code: KeyCode::Char('q'),
+                            modifiers: event::KeyModifiers::NONE,
+                            ..
+                        } => break,
+                        _ => {}
+                    }
+                    println!("{:?}\r", event);
+                };
+            } else {
+                println!("No input yet\r");
+            }
+        }
+        Ok(())
+    });
     let mut board = Board::new();
     println!("{:?}", board.get_rows());
     println!();
     println!("{:?}", board.get_cols());
+    Ok(())
 }
