@@ -24,7 +24,7 @@ impl Drop for CleanUp {
     }
 }
 
-mod board {
+mod board_mod {
     use std::collections::HashMap;
     use crossterm::style::Stylize;
 
@@ -95,7 +95,7 @@ mod board {
         pub fn new() -> Self {
             Self { cells: HashMap::new(), player_pos:(0, 0) }
         }
-        pub fn get_cell(&mut self, location:&Position) -> &Cell {
+        pub fn load_cell(&mut self, location:&Position) -> &Cell {
             self.cells.entry(*location).or_insert_with(||{
                 // Generate cells here
                 let random_nbr: f32 = rand::random();
@@ -107,6 +107,9 @@ mod board {
                     Cell::from_base(CellBase::Sand)
                 }
             })
+        }
+        pub fn get_cell(&mut self, location:&Position) -> &Cell {
+            self.cells.get(location)
         }
         pub fn get_display_at_location(&mut self, center_chunk_location:&Position) -> String {
             let mut s = String::new();
@@ -178,14 +181,14 @@ enum GameInput {
     MoveDown,
     MoveLeft,
     MoveRight,
-    Pause
+    DropPointer,
 }
 
 fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
     queue!(stdout(), terminal::Clear(ClearType::All), cursor::Hide)?;
     stdout().flush()?;
 
-    let mut board = board::Board::new();
+    let mut board = board_mod::Board::new();
 
     let mut current_display = String::new();
 
@@ -199,10 +202,7 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
                     GameInput::MoveDown => {board.player_pos.1 += 1},
                     GameInput::MoveLeft => {board.player_pos.0 -= 1},
                     GameInput::MoveRight => {board.player_pos.0 += 1},
-                    GameInput::Pause => {
-                        println!("Paused\r");
-                        
-                    }
+                    GameInput::DropPointer => {board.get_cell_mut(board.player_pos).set_content(board_mod::CellContent::Pointer)}
                 }
             },
             Err(_e) => {}
