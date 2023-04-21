@@ -1,11 +1,6 @@
 #[macro_use]
 extern crate error_chain;
-
 use crossterm::terminal::ClearType;
-use rand::{thread_rng, prelude::*};
-use arr_macro::arr;
-
-use crossterm::style::Stylize;
 use crossterm::event::{Event, KeyCode, KeyEvent};
 use crossterm::{event, terminal, execute, queue, cursor};
 use std::io::{stdout, Write};
@@ -30,33 +25,35 @@ impl Drop for CleanUp {
 }
 
 mod board {
+    use std::collections::HashMap;
     use crossterm::style::Stylize;
-    use grid::*;
-    use super::errors::*;
-    const CHUNK_SIZE:usize = 10;
 
-    enum CellBase {
+    pub type Position = (isize, isize);
+
+    pub enum CellBase {
         Grass,
         Water,
         Sand,
         Stone
     }
     
-    enum CellContent {
-        Player,
+    pub enum CellContent {
         Food,
-        Poison
+        Poison,
+        None
     }
     
-    struct Cell {
+    pub struct Cell {
         base:CellBase,
-        content:Option<CellContent>
+        content:CellContent,
+        height:isize
     }
     impl Default for Cell {
         fn default() -> Self {
             Self {
                 base: CellBase::Grass,
-                content: None
+                content: CellContent::None,
+                height: 0
             }
         }
     }
@@ -64,15 +61,24 @@ mod board {
         pub fn new() -> Self {
             Self::default()
         }
-        pub fn to_colored_string(&self) {
+        pub fn from_base(base:CellBase) -> Self {
+            Self{
+                base,
+                content: CellContent::None,
+                height: 0
+            }
+        }
+        pub fn to_colored_string(&self, contains_player:bool) -> String {
             let mut s = match self.content {
-                None => " ".to_string(),
-                Some(CellContent::Player) => "*".black().bold().to_string(),
-                Some(CellContent::Food) => "F".yellow().to_string(),
-                Some(CellContent::Poison) => "P".red().to_string()
+                CellContent::None => " ".to_string(),
+                CellContent::Food => "F".yellow().to_string(),
+                CellContent::Poison => "P".red().to_string()
             };
+            if contains_player {
+                s = "*".white().to_string();
+            }
             match self.base {
-                CellBase::Grass => s = s.on_green().to_string(),
+                CellBase::Grass => s = s.on_dark_green().to_string(),
                 CellBase::Water => s = s.on_blue().to_string(),
                 CellBase::Sand => s = s.on_yellow().to_string(),
                 CellBase::Stone => s = s.on_grey().to_string()
@@ -80,160 +86,55 @@ mod board {
             s
         }
     }
-    struct Chunk {
-        content:Grid<Cell>,
-        location:(isize, isize)
-    }
-    impl Chunk {
-        pub fn new(location:(isize, isize)) -> Self {
-            Self {
-                content: Grid::new(CHUNK_SIZE, CHUNK_SIZE),
-                location
-            }
-        }
-    }
 
     pub struct Board {
-        chunks:Vec<Chunk>
+        cells:HashMap<Position, Cell>,
+        pub player_pos:Position
     }
     impl Board {
         pub fn new() -> Self {
-            Self { chunks: vec![] }
+            Self { cells: HashMap::new(), player_pos:(0, 0) }
         }
-        pub fn get_chunk(&mut self, location:(isize, isize)) -> &Chunk {
-            self.chunks.iter().find(|c| c.location == location).unwrap_or_else(||{
-                self.chunks.push(Chunk::new(location));
-                self.get_chunk(location)
-                // Possible bug: if a modification is done, it can create an infinite recursion
+        pub fn get_cell(&mut self, location:&Position) -> &Cell {
+            self.cells.entry(*location).or_insert_with(||{
+                // Generate cells here
+                let random_nbr: f32 = rand::random();
+                if random_nbr < 0.5 {
+                    Cell::from_base(CellBase::Grass)
+                } else if random_nbr < 0.9 {
+                    Cell::from_base(CellBase::Stone)
+                } else {
+                    Cell::from_base(CellBase::Sand)
+                }
             })
+        }
+        pub fn get_display_at_location(&mut self, center_chunk_location:&Position) -> String {
+            let mut s = String::new();
+            for y in -15..15 {
+                for x in -15..15 {
+                    let cell_location = (center_chunk_location.0 + x, center_chunk_location.1 + y);
+                    let cell_contains_player = self.player_pos == cell_location;
+                    s += &self.get_cell(&cell_location).to_colored_string(cell_contains_player);
+                }
+                s += "\n\r";
+            }
+            s.pop();
+            s.pop();
+            s
+        }
+        pub fn get_display(&mut self) -> String {
+            self.get_display_at_location(&self.player_pos.clone())
         }
     }
 }
 
-// const BOARD_WIDTH:usize = 10;
-// const BOARD_HEIGHT:usize = 10;
+enum MsgToMain {
+    StopProgram,
+    InputThreadCrash,
+    GameThreadCrash
+}
 
-// type BasicBoard = [[Cell;10];10];
-// type BasicBoardRefRotated<'a> = [[&'a Cell;10];10];
-
-// struct Board {
-//     rows:BasicBoard,
-//     player_pos:(usize, usize)
-// }
-
-// impl Board {
-//     pub fn get_rows(&self) -> &BasicBoard {
-//         &self.rows
-//     }
-//     pub fn get_rows_mut(&mut self) -> &mut BasicBoard {
-//         &mut self.rows
-//     }
-//     pub fn get_cols(&self) -> BasicBoardRefRotated {
-//         let mut i = 0;
-//         let cols:BasicBoardRefRotated = arr![{
-//             i += 1;
-//             let mut j = 0;
-//             arr![{
-//                 j += 1;
-//                 &self.rows[j-1][i-1]
-//             }; 10] // BOARD_HEIGHT
-//         }; 10]; // BOARD_WIDTH
-//         cols
-//     }
-//     pub fn get(&self, row:usize, col:usize) -> Result<&Cell> {
-//         if row >= BOARD_HEIGHT {
-//             Err("row out of range".into())
-//         } else if col >= BOARD_WIDTH {
-//             Err("col out of range".into())
-//         } else {
-//             Ok(&self.rows[row][col])
-//         }
-//     }
-//     pub fn set(&mut self, row:usize, col:usize, val:Cell) -> Result<()> {
-//         if row >= BOARD_HEIGHT {
-//             Err("row out of range".into())
-//         } else if col >= BOARD_WIDTH {
-//             Err("col out of range".into())
-//         } else {
-//             self.rows[row][col] = val;
-//             Ok(())
-//         }
-//     }
-//     pub fn new() -> Self {
-//         let mut rng = thread_rng();
-//         Self { rows: arr![{
-//                 arr![{
-//                     let rand_num: f32 = rng.gen();
-//                     if rand_num > 0.9 {
-//                         Cell::Food
-//                     } else if rand_num < 0.1 {
-//                         Cell::Poison
-//                     } else {
-//                         Cell::Null
-//                     }
-//                 }; 10] // BOARD_WIDTH
-//             }; 10], // BOARD_HEIGHT
-//             player_pos: (4, 4)
-//         }
-//     }
-//     pub fn cell_code_to_char(cell_code:&Cell) -> char {
-//         match cell_code {
-//             Cell::Null => '.',
-//             Cell::Food => 'F',
-//             Cell::Poison => 'P',
-//             _ => '?'
-//         }
-//     }
-//     pub fn cell_code_to_colored(cell_code:&Cell) -> String {
-//         match cell_code {
-//             Cell::Null => ".".to_string(),
-//             Cell::Food => "F".on_green().to_string(),
-//             Cell::Poison => "P".on_red().to_string(),
-//             _ => "?".to_string()
-//         }
-//     }
-//     pub fn display(&self, up:&i32) -> Result<()> {
-//         let mut s = <&Board as Into<String>>::into(self);
-//         write!(stdout(), "{}", s)?;
-//         Ok(())
-//     }
-// }
-// impl Into<String> for &Board {
-//     fn into(self) -> String {
-//         let mut char_board = self.get_rows()
-//             .map(|row| {
-//                 row.map(|x| {
-//                     Board::cell_code_to_colored(&x)
-//                 })
-//             });
-        
-//         char_board[self.player_pos.1][self.player_pos.0] = '*'.yellow().to_string();
-
-//         let mut s = char_board
-//             .map(|row| {
-//                 row.iter().fold(String::new(), |mut acc, x| {
-//                     acc += x;
-//                     acc
-//                 })
-//             }).iter().fold(String::new(), |mut acc, x| {
-//                 acc.push_str(x);
-//                 acc += "\n\r";
-//                 acc
-//             });
-//         s.pop();
-//         s.pop();
-//         s += "\r";
-//         s
-//     }
-// }
-
-/*
- * Code :
- * 0: STOP_PROGRAM (send to main thread to stop all threads and exit)
- * 1: INPUT_THREAD_CRASH (send to main thread to display error and exit)
- * 2: GAME_THREAD_CRASH (send to main thread to display error and exit)
- */
-fn input_thread(game_tx:Sender<GameInput>) -> Result<u16> {
+fn input_thread(game_tx:Sender<GameInput>) -> Result<MsgToMain> {
     terminal::enable_raw_mode()?;
     loop {
         if let Event::Key(event) = event::read()? {
@@ -242,7 +143,7 @@ fn input_thread(game_tx:Sender<GameInput>) -> Result<u16> {
                     code: KeyCode::Char('q'),
                     modifiers: event::KeyModifiers::NONE,
                     ..
-                } => { return Ok(0) },
+                } => { return Ok(MsgToMain::StopProgram) },
                 KeyEvent {
                     code: KeyCode::Up,
                     modifiers: event::KeyModifiers::NONE,
@@ -280,14 +181,13 @@ enum GameInput {
     Pause
 }
 
-fn game_thread(input_rx:Receiver<GameInput>) -> Result<u16> {
-    execute!(stdout(), terminal::Clear(ClearType::All))?; // Clear screen
+fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
+    queue!(stdout(), terminal::Clear(ClearType::All), cursor::Hide)?;
+    stdout().flush()?;
 
     let mut board = board::Board::new();
 
-    let mut in_game_time = 0;
-
-    let mut up = 0;
+    let mut current_display = String::new();
 
     loop {
         match input_rx.try_recv() {
@@ -308,10 +208,15 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<u16> {
             Err(_e) => {}
         }
         queue!(stdout(),
-            terminal::Clear(ClearType::All),
             cursor::MoveTo(0, 0)
         )?;
-        board.display(&up)?;
+        stdout().flush()?;
+        let display = board.get_display();
+        if display != current_display {
+            current_display = display;
+            println!("{}", current_display);
+            // write!(stdout(), "{}", current_display)?;
+        }
         stdout().flush()?;
     }
 }
@@ -319,13 +224,14 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<u16> {
 fn exit_display() -> Result<()> {
     terminal::disable_raw_mode()?;
     execute!(stdout(), terminal::Clear(ClearType::All))?;
+    execute!(stdout(), cursor::Show)?;
     Ok(())
 }
 
 fn main() -> Result<()> {
     let _clean_up = CleanUp;
 
-    let (main_tx, main_rx) = mpsc::channel::<u16>();
+    let (main_tx, main_rx) = mpsc::channel::<MsgToMain>();
     let input_main_tx = main_tx.clone();
     let game_main_tx = main_tx.clone();
     let (input_game_tx, game_input_rx) = mpsc::channel::<GameInput>();
@@ -335,7 +241,7 @@ fn main() -> Result<()> {
                 input_main_tx.send(v).unwrap();
             },
             Err(_e) => {
-                input_main_tx.send(2).unwrap();
+                input_main_tx.send(MsgToMain::InputThreadCrash).unwrap();
             }
         }
     });
@@ -345,30 +251,22 @@ fn main() -> Result<()> {
                 game_main_tx.send(v).unwrap();
             },
             Err(_e) => {
-                game_main_tx.send(1).unwrap();
+                game_main_tx.send(MsgToMain::GameThreadCrash).unwrap();
             }
         }
     });
 
-    loop {
-        match main_rx.recv().unwrap() {
-            0 => { break },
-            1 => {
-                exit_display()?;
-                println!("Error in input thread");
-                break
-            },
-            2 => {
-                exit_display()?;
-                println!("Error in game thread");
-                break
-            },
-            _ => {
-                exit_display()?;
-                println!("Unknown message received");
-                break
-            }
+    match main_rx.recv().unwrap() {
+        MsgToMain::StopProgram => { Ok(()) },
+        MsgToMain::InputThreadCrash => {
+            exit_display()?;
+            println!("Error in input thread");
+            Ok(())
+        },
+        MsgToMain::GameThreadCrash => {
+            exit_display()?;
+            println!("Error in game thread");
+            Ok(())
         }
     }
-    Ok(())
 }
