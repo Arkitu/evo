@@ -2,7 +2,9 @@
 extern crate error_chain;
 use crossterm::terminal::ClearType;
 use crossterm::event::{Event, KeyCode, KeyEvent};
+use crossterm::style::Stylize;
 use crossterm::{event, terminal, execute, queue, cursor};
+use error_chain::mock::ErrorKind;
 use std::io::{stdout, Write};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread;
@@ -27,6 +29,8 @@ impl Drop for CleanUp {
 mod board_mod {
     use std::collections::HashMap;
     use crossterm::style::Stylize;
+    use super::errors::*;
+    use num_integer::div_floor;
 
     pub type Position = (isize, isize);
 
@@ -40,6 +44,7 @@ mod board_mod {
     pub enum CellContent {
         Food,
         Poison,
+        Pointer,
         None
     }
     
@@ -68,11 +73,20 @@ mod board_mod {
                 height: 0
             }
         }
+        pub fn set_content(&mut self, content:CellContent) -> Result<()> {
+            if let CellContent::None = self.content {
+                self.content = content;
+                Ok(())
+            } else {
+                bail!("Cell is not empty!")
+            }
+        }
         pub fn to_colored_string(&self, contains_player:bool) -> String {
             let mut s = match self.content {
                 CellContent::None => " ".to_string(),
                 CellContent::Food => "F".yellow().to_string(),
-                CellContent::Poison => "P".red().to_string()
+                CellContent::Poison => "P".red().to_string(),
+                CellContent::Pointer => "#".red().to_string()
             };
             if contains_player {
                 s = "*".white().to_string();
@@ -95,8 +109,9 @@ mod board_mod {
         pub fn new() -> Self {
             Self { cells: HashMap::new(), player_pos:(0, 0) }
         }
-        pub fn load_cell(&mut self, location:&Position) -> &Cell {
-            self.cells.entry(*location).or_insert_with(||{
+        /// get the cell or create it if it don't exist yet
+        pub fn load_cell(&mut self, pos:Position) -> &Cell {
+            self.cells.entry(pos).or_insert_with(||{
                 // Generate cells here
                 let random_nbr: f32 = rand::random();
                 if random_nbr < 0.5 {
@@ -108,16 +123,24 @@ mod board_mod {
                 }
             })
         }
-        pub fn get_cell(&mut self, location:&Position) -> &Cell {
-            self.cells.get(location)
+        pub fn try_get_cell(&self, pos:&Position) -> Option<&Cell> {
+            self.cells.get(pos)
         }
-        pub fn get_display_at_location(&mut self, center_chunk_location:&Position) -> String {
+        pub fn get_cell(&mut self, pos:Position) -> &Cell {
+            self.load_cell(pos)
+        }
+        pub fn get_cell_mut(&mut self, pos:Position) -> &mut Cell {
+            self.load_cell(pos);
+            self.cells.get_mut(&pos).unwrap()
+        }
+        pub fn get_display_at_location(&mut self, size:(isize, isize), center_chunk_location:&Position) -> String {
+            let padding: (isize, isize) = (div_floor(size.0,2), size.1.div_floor(2));
             let mut s = String::new();
             for y in -15..15 {
                 for x in -15..15 {
                     let cell_location = (center_chunk_location.0 + x, center_chunk_location.1 + y);
                     let cell_contains_player = self.player_pos == cell_location;
-                    s += &self.get_cell(&cell_location).to_colored_string(cell_contains_player);
+                    s += &self.load_cell(cell_location).to_colored_string(cell_contains_player);
                 }
                 s += "\n\r";
             }
@@ -125,8 +148,8 @@ mod board_mod {
             s.pop();
             s
         }
-        pub fn get_display(&mut self) -> String {
-            self.get_display_at_location(&self.player_pos.clone())
+        pub fn get_display(&mut self, size:(isize, isize)) -> String {
+            self.get_display_at_location(size, &self.player_pos.clone())
         }
     }
 }
@@ -144,32 +167,29 @@ fn input_thread(game_tx:Sender<GameInput>) -> Result<MsgToMain> {
             match event {
                 KeyEvent {
                     code: KeyCode::Char('q'),
-                    modifiers: event::KeyModifiers::NONE,
                     ..
                 } => { return Ok(MsgToMain::StopProgram) },
                 KeyEvent {
                     code: KeyCode::Up,
-                    modifiers: event::KeyModifiers::NONE,
                     ..
                 } => { game_tx.send(GameInput::MoveUp).unwrap(); },
                 KeyEvent {
                     code: KeyCode::Down,
-                    modifiers: event::KeyModifiers::NONE,
                     ..
                 } => { game_tx.send(GameInput::MoveDown).unwrap(); },
                 KeyEvent {
                     code: KeyCode::Left,
-                    modifiers: event::KeyModifiers::NONE,
                     ..
                 } => { game_tx.send(GameInput::MoveLeft).unwrap(); },
                 KeyEvent {
                     code: KeyCode::Right,
-                    modifiers: event::KeyModifiers::NONE,
                     ..
                 } => { game_tx.send(GameInput::MoveRight).unwrap(); },
-                _ => {
-                    game_tx.send(GameInput::Pause).unwrap();
-                }
+                KeyEvent {
+                    code: KeyCode::Char('p'),
+                    ..
+                } => { game_tx.send(GameInput::DropPointer).unwrap(); },
+                _ => {}
             }
         };
     }
@@ -191,6 +211,7 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
     let mut board = board_mod::Board::new();
 
     let mut current_display = String::new();
+    let mut msg_to_player = String::new();
 
     loop {
         match input_rx.try_recv() {
@@ -202,7 +223,11 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
                     GameInput::MoveDown => {board.player_pos.1 += 1},
                     GameInput::MoveLeft => {board.player_pos.0 -= 1},
                     GameInput::MoveRight => {board.player_pos.0 += 1},
-                    GameInput::DropPointer => {board.get_cell_mut(board.player_pos).set_content(board_mod::CellContent::Pointer)}
+                    GameInput::DropPointer => {
+                        if let Err(m) = board.get_cell_mut(board.player_pos).set_content(board_mod::CellContent::Pointer) {
+                             msg_to_player = "/!\\".red().to_string() + &m.to_string();
+                        }
+                    }
                 }
             },
             Err(_e) => {}
@@ -211,11 +236,11 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
             cursor::MoveTo(0, 0)
         )?;
         stdout().flush()?;
-        let display = board.get_display();
-        if display != current_display {
+        let display = board.get_display(terminal::size());
+        if display != current_display || !msg_to_player.is_empty() {
             current_display = display;
-            println!("{}", current_display);
-            // write!(stdout(), "{}", current_display)?;
+            println!("{}\n\r{}", current_display, msg_to_player);
+            msg_to_player = String::new();
         }
         stdout().flush()?;
     }
