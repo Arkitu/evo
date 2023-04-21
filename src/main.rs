@@ -133,12 +133,12 @@ mod board_mod {
             self.load_cell(pos);
             self.cells.get_mut(&pos).unwrap()
         }
-        pub fn get_display_at_location(&mut self, size:(isize, isize), center_chunk_location:&Position) -> String {
-            let padding: (isize, isize) = (div_floor(size.0,2), size.1.div_floor(2));
+        pub fn get_display_at_location(&mut self, size:(u16, u16), center_chunk_location:&Position) -> String {
+            let padding: (i16, i16) = (div_floor(size.0,2) as i16, div_floor(size.1,2) as i16);
             let mut s = String::new();
-            for y in -15..15 {
-                for x in -15..15 {
-                    let cell_location = (center_chunk_location.0 + x, center_chunk_location.1 + y);
+            for y in -padding.1..padding.1 {
+                for x in -padding.0..padding.0 {
+                    let cell_location = (center_chunk_location.0 + (x as isize), center_chunk_location.1 + (y as isize));
                     let cell_contains_player = self.player_pos == cell_location;
                     s += &self.load_cell(cell_location).to_colored_string(cell_contains_player);
                 }
@@ -148,8 +148,12 @@ mod board_mod {
             s.pop();
             s
         }
-        pub fn get_display(&mut self, size:(isize, isize)) -> String {
+        pub fn get_display(&mut self, size:(u16, u16)) -> String {
             self.get_display_at_location(size, &self.player_pos.clone())
+        }
+        pub fn get_display_with_step(&mut self, size:(u16, u16), step:isize) -> String {
+            let player_pos = self.player_pos.clone();
+            self.get_display_at_location(size, &((player_pos.0/step)*step, (player_pos.1/step)*step))
         }
     }
 }
@@ -232,14 +236,19 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
             },
             Err(_e) => {}
         }
-        queue!(stdout(),
-            cursor::MoveTo(0, 0)
-        )?;
-        stdout().flush()?;
-        let display = board.get_display(terminal::size());
+        //msg_to_player = format!("{:?}", terminal::size()?);
+        let display = board.get_display(terminal::size()?.into());
         if display != current_display || !msg_to_player.is_empty() {
+            queue!(stdout(),
+                cursor::MoveTo(0, 0)
+            )?;
+            stdout().flush()?;
             current_display = display;
-            println!("{}\n\r{}", current_display, msg_to_player);
+            if !msg_to_player.is_empty() {
+                println!("{}\n\r{}", current_display, msg_to_player);
+            } else {
+                println!("{}", current_display);
+            }
             msg_to_player = String::new();
         }
         stdout().flush()?;
