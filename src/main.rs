@@ -4,7 +4,6 @@ use crossterm::terminal::ClearType;
 use crossterm::event::{Event, KeyCode, KeyEvent};
 use crossterm::style::Stylize;
 use crossterm::{event, terminal, execute, queue, cursor};
-use error_chain::mock::ErrorKind;
 use std::io::{stdout, Write};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread;
@@ -140,7 +139,7 @@ mod board_mod {
                 for x in -padding.0..padding.0 {
                     let cell_location = (center_chunk_location.0 + (x as isize), center_chunk_location.1 + (y as isize));
                     let cell_contains_player = self.player_pos == cell_location;
-                    s += &self.load_cell(cell_location).to_colored_string(cell_contains_player);
+                    s += &self.get_cell(cell_location).to_colored_string(cell_contains_player);
                 }
                 s += "\n\r";
             }
@@ -236,7 +235,6 @@ fn game_thread(input_rx:Receiver<GameInput>) -> Result<MsgToMain> {
             },
             Err(_e) => {}
         }
-        //msg_to_player = format!("{:?}", terminal::size()?);
         let display = board.get_display(terminal::size()?.into());
         if display != current_display || !msg_to_player.is_empty() {
             queue!(stdout(),
